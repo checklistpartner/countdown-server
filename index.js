@@ -5,8 +5,8 @@ const _ = require('lodash')
 	, bodyParser = require('body-parser')
 	, logger = require('morgan')
 	, app = require('express')()
-	, counts = {}
-	, commands = { create, decrement, remove, addResult }
+	, countCfgs = {}
+	, commands = { create, decrement, remove, addResult, progress }
 app.use(logger('dev'));
 app.use(bodyParser.json());
 app.post('/countdown', command);
@@ -24,12 +24,12 @@ const server = app.listen(process.env.PORT || 7777, function() {
 	})
 
 	setTimeout(() => processQueues(counts), 100)
-}(counts)
+}(countCfgs)
 
 function decrementCount(countCfg, decrementReq) {
 	const next = nextRange(countCfg.count, countCfg.position, decrementReq.size)
 	countCfg.position = nextPosition(countCfg.count, countCfg.position, decrementReq.size)
-	console.log('decrementCount', {id:countCfg.id, next, nextPosition:countCfg.position})
+	console.log('decrementCount', {id:countCfg.id, node:decrementReq.node, next, nextPosition:countCfg.position})
 	decrementReq.res.send(next)
 }
 
@@ -61,16 +61,31 @@ function command(req, res) {
 
 
 function create (command, res) {
-	counts[command.id] = {id:command.id, count:command.count, position:0, queue:[]}
-	console.log('create', JSON.stringify(counts[command.id], null, 1))
+	countCfgs[command.id] = createCommandCfg(command.id, command.count)
+	console.log('create', JSON.stringify(countCfgs[command.id], null, 1))
 	res200(res)({})
 }
 
 function decrement (command, res) {
-	counts[command.id]
-		? counts[command.id].queue.push({size: command.size, res})
+	countCfgs[command.id]
+		? countCfgs[command.id].queue.push({size: command.size, res, node:command.node})
 		: res200(res)({empty: true})
 
+}
+
+function createCommandCfg(id, count) {
+	return {
+		id,
+		count,
+		position:0,
+		queue:[],
+		results:[],
+		toString(){
+			const t = _.pick(this, 'id', 'count', 'position', 'results')
+			t.queue = this.queue.length
+			console.log('toString', JSON.stringify(t, null, 1))
+			return t
+		}}
 }
 
 function nextRange(count, position, size) {
@@ -93,20 +108,24 @@ function nextPosition(count, position, size) {
 
 
 function remove (command, res) {
-	delete counts[command.id]
-	console.log('remove', JSON.stringify(_.omit(counts[command.id], 'queue'), null, 1))
+	delete countCfgs[command.id]
+	console.log('remove', JSON.stringify(_.omit(countCfgs[command.id], 'queue'), null, 1))
 	res200(res)({})
 }
 
 
 
 function addResult (command, res) {
-	// return db.ref('results/' + command.id + '/' + command.resultId)
-	// 	.set(command.result)
-	// 	.then(mapObject)
-	// 	.then(res200(res))
-	// 	.catch(res500(res))
-	res200(res)({})
+	countCfgs[command.id]
+		? countCfgs[command.id].results.push({node: command.resultId, result:command.result})
+				&& res200(res)({})
+		: res400(res, `invalid id ${command.id}`)
+}
+
+function progress (command, res) {
+	countCfgs[command.id]
+		? res200(res)(countCfgs[command.id].toString())
+		: res400(res, `invalid id ${command.id}`)
 }
 
 
